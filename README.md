@@ -1,4 +1,4 @@
-# Challenge Friends - Backend
+# RETA2 - Backend
 
 Backend para la aplicación Challenge Friends, una plataforma para crear y participar en competencias deportivas con amigos.
 
