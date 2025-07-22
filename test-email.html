@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de Correo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #4F46E5;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4F46E5;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #3c37b5;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border-left: 4px solid #4F46E5;
+            background-color: #f0f4ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Prueba de Envío de Correo</h1>
+        <p>Este formulario permite probar la configuración de correo electrónico con Gmail.</p>
+        
+        <div class="form-group">
+            <label for="email">Correo electrónico:</label>
+            <input type="email" id="email" placeholder="ejemplo@gmail.com" value="eloy.gonzalezja@gmail.com">
+        </div>
+        
+        <button id="sendButton">Enviar correo de prueba</button>
+        
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        document.getElementById('sendButton').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const resultDiv = document.getElementById('result');
+            
+            resultDiv.innerHTML = "Enviando correo...";
+            resultDiv.style.display = "block";
+            
+            try {
+                const response = await fetch('http://localhost:5001/test/test-email', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <h3>✅ Correo enviado exitosamente</h3>
+                        <p>El correo ha sido enviado a: ${email}</p>
+                        <pre>${JSON.stringify(data.details, null, 2)}</pre>
+                    `;
+                    resultDiv.style.borderLeft = "4px solid green";
+                } else {
+                    resultDiv.innerHTML = `
+                        <h3>❌ Error al enviar correo</h3>
+                        <p>${data.message}</p>
+                        <pre>${JSON.stringify(data.error, null, 2)}</pre>
+                    `;
+                    resultDiv.style.borderLeft = "4px solid red";
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <h3>❌ Error de conexión</h3>
+                    <p>No se pudo conectar al servidor. Asegúrate de que el servidor backend esté en ejecución en el puerto 5001.</p>
+                    <p>Error: ${error.message}</p>
+                `;
+                resultDiv.style.borderLeft = "4px solid red";
+            }
+        });
+    </script>
+</body>
+</html>

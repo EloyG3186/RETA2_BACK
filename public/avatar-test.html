@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de Avatares</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-case {
+            margin-bottom: 30px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .avatar-container {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #ccc;
+            margin-right: 15px;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        code {
+            background-color: #f5f5f5;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .diagnosis {
+            border-left: 5px solid #ffcc00;
+            padding: 10px;
+            background-color: #fffbe6;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Diagnóstico de Visualización de Avatares</h1>
+    
+    <div class="test-case">
+        <h2>Verificación de API</h2>
+        <div class="diagnosis" id="apiStatus">
+            Verificando configuración de servidor...
+        </div>
+        <button id="checkApiBtn">Verificar API</button>
+    </div>
+
+    <div class="test-case">
+        <h2>Verificación de archivos</h2>
+        <div>
+            <input type="text" id="filePathInput" placeholder="Nombre del archivo (ej: avatar-1234.png)" style="width: 300px;"/>
+            <button id="checkFileBtn">Verificar archivo</button>
+        </div>
+        <div class="diagnosis" id="fileStatus">
+            Ingresa un nombre de archivo para verificar si existe en el servidor
+        </div>
+    </div>
+
+    <div class="test-case">
+        <h2>Listar archivos de avatares</h2>
+        <button id="listFilesBtn">Listar archivos en carpeta de avatares</button>
+        <div class="diagnosis" id="fileList">
+            Haz clic para listar archivos de avatar disponibles
+        </div>
+    </div>
+    
+    <h2>Pruebas de visualización de avatares</h2>
+    
+    <div class="test-case">
+        <h3>Caso 1: Ruta directa con nombre de archivo</h3>
+        <p>URL: <code id="url1"></code></p>
+        <div class="avatar-container">
+            <img src="" alt="Avatar Caso 1" class="avatar" id="avatar1">
+            <div>
+                <p>Estado: <span id="status1">Cargando...</span></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <h3>Caso 2: Ruta con prefijo /uploads/avatars</h3>
+        <p>URL: <code id="url2"></code></p>
+        <div class="avatar-container">
+            <img src="" alt="Avatar Caso 2" class="avatar" id="avatar2">
+            <div>
+                <p>Estado: <span id="status2">Cargando...</span></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <h3>Caso 3: Ruta a través del endpoint API</h3>
+        <p>URL: <code id="url3"></code></p>
+        <div class="avatar-container">
+            <img src="" alt="Avatar Caso 3" class="avatar" id="avatar3">
+            <div>
+                <p>Estado: <span id="status3">Cargando...</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = window.location.origin; // Mismo origen que esta página
+        let selectedAvatar = '';
+
+        // Función para verificar estado de la API
+        document.getElementById('checkApiBtn').addEventListener('click', async function() {
+            const apiStatus = document.getElementById('apiStatus');
+            try {
+                apiStatus.innerHTML = 'Verificando configuración del servidor...';
+                const response = await fetch(`${API_BASE_URL}/diagnostic/static-config`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = '<p class="success">✅ Servidor encontrado correctamente</p>';
+                    html += '<h4>Rutas estáticas configuradas:</h4><ul>';
+                    
+                    for (const route of data.staticRoutes) {
+                        const status = route.exists ? 
+                            '<span class="success">✅ Directorio existente</span>' : 
+                            '<span class="error">❌ Directorio NO EXISTE</span>';
+                        
+                        html += `<li><strong>${route.route}</strong> -> ${route.directory} ${status}</li>`;
+                    }
+                    
+                    html += '</ul>';
+                    apiStatus.innerHTML = html;
+                } else {
+                    apiStatus.innerHTML = `<p class="error">❌ Error al verificar la API: ${data.message}</p>`;
+                }
+            } catch (error) {
+                apiStatus.innerHTML = `<p class="error">❌ Error de conexión: ${error.message}</p>`;
+            }
+        });
+
+        // Función para verificar un archivo específico
+        document.getElementById('checkFileBtn').addEventListener('click', async function() {
+            const filePathInput = document.getElementById('filePathInput');
+            const fileStatus = document.getElementById('fileStatus');
+            const filepath = filePathInput.value.trim();
+            
+            if (!filepath) {
+                fileStatus.innerHTML = '<p class="error">Ingresa un nombre de archivo para verificar</p>';
+                return;
+            }
+            
+            try {
+                fileStatus.innerHTML = 'Verificando archivo...';
+                const response = await fetch(`${API_BASE_URL}/diagnostic/check-file?filepath=${encodeURIComponent(filepath)}`);
+                const data = await response.json();
+                
+                if (data.success && data.exists) {
+                    selectedAvatar = filepath;
+                    fileStatus.innerHTML = `
+                        <p class="success">✅ Archivo encontrado</p>
+                        <ul>
+                            <li><strong>Ruta completa:</strong> ${data.path}</li>
+                            <li><strong>Tamaño:</strong> ${data.size} bytes</li>
+                        </ul>
+                        <button id="useThisAvatar">Probar este avatar en los casos de prueba</button>
+                    `;
+                    
+                    // Evento para usar este avatar en los casos de prueba
+                    document.getElementById('useThisAvatar').addEventListener('click', function() {
+                        setupTestCases(filepath);
+                    });
+                } else {
+                    fileStatus.innerHTML = `<p class="error">❌ Archivo no encontrado: ${data.message}</p>`;
+                }
+            } catch (error) {
+                fileStatus.innerHTML = `<p class="error">❌ Error al verificar archivo: ${error.message}</p>`;
+            }
+        });
+        
+        // Función para listar archivos
+        document.getElementById('listFilesBtn').addEventListener('click', async function() {
+            const fileList = document.getElementById('fileList');
+            try {
+                fileList.innerHTML = 'Obteniendo lista de archivos...';
+                const response = await fetch(`${API_BASE_URL}/diagnostic/list-files?directory=avatars`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.fileCount > 0) {
+                        let html = `<p class="success">✅ Se encontraron ${data.fileCount} archivos en ${data.directory}</p><ul>`;
+                        
+                        data.files.forEach(file => {
+                            const modified = new Date(file.modified).toLocaleString();
+                            html += `
+                                <li>
+                                    <strong>${file.name}</strong> (${file.size} bytes) - 
+                                    Modificado: ${modified}
+                                    <button onclick="setupTestCases('${file.name}')">Usar este avatar</button>
+                                </li>
+                            `;
+                        });
+                        
+                        html += '</ul>';
+                        fileList.innerHTML = html;
+                    } else {
+                        fileList.innerHTML = '<p class="error">⚠️ No se encontraron archivos en la carpeta de avatares</p>';
+                    }
+                } else {
+                    fileList.innerHTML = `<p class="error">❌ Error al listar archivos: ${data.message}</p>`;
+                }
+            } catch (error) {
+                fileList.innerHTML = `<p class="error">❌ Error al listar archivos: ${error.message}</p>`;
+            }
+        });
+        
+        // Función para configurar los casos de prueba
+        function setupTestCases(avatarName) {
+            selectedAvatar = avatarName;
+            if (!avatarName) return;
+            
+            // Configurar URLs de prueba
+            const url1 = `${API_BASE_URL}/${avatarName}`;
+            const url2 = `${API_BASE_URL}/uploads/avatars/${avatarName}`;
+            const url3 = `${API_BASE_URL}/api/avatars/${avatarName}`;
+            
+            // Mostrar URLs
+            document.getElementById('url1').textContent = url1;
+            document.getElementById('url2').textContent = url2;
+            document.getElementById('url3').textContent = url3;
+            
+            // Configurar imágenes
+            const img1 = document.getElementById('avatar1');
+            const img2 = document.getElementById('avatar2');
+            const img3 = document.getElementById('avatar3');
+            
+            img1.src = url1;
+            img2.src = url2;
+            img3.src = url3;
+            
+            // Configurar eventos para verificar carga
+            checkImageLoad(img1, 'status1');
+            checkImageLoad(img2, 'status2');
+            checkImageLoad(img3, 'status3');
+        }
+        
+        // Función para verificar si la imagen carga correctamente
+        function checkImageLoad(imgElement, statusId) {
+            const statusElement = document.getElementById(statusId);
+            
+            imgElement.onload = function() {
+                statusElement.textContent = 'Cargada correctamente ✅';
+                statusElement.classList.remove('error');
+                statusElement.classList.add('success');
+            };
+            
+            imgElement.onerror = function() {
+                statusElement.textContent = 'Error al cargar ❌';
+                statusElement.classList.remove('success');
+                statusElement.classList.add('error');
+            };
+        }
+        
+        // Función global para poder llamarla desde los botones generados dinámicamente
+        window.setupTestCases = setupTestCases;
+    </script>
+</body>
+</html>
