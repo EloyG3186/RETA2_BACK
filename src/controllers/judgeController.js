@@ -96,7 +96,8 @@ exports.assignJudge = async (req, res) => {
       challengeId: id,
       type: 'judge_assigned',
       timestamp: new Date(),
-      description: `Se ha asignado un juez al desafío. Esperando que el juez acepte la asignación.`
+      description: `Se ha asignado un juez al desafío. Esperando que el juez acepte la asignación.`,
+      userId: userId // El usuario autenticado (creador) que asigna el juez
     }, { transaction });
     
     console.log(`Juez asignado con éxito. Desafío ${id} ahora en estado 'judge_assigned'`);
@@ -209,7 +210,8 @@ exports.acceptJudgeAssignment = async (req, res) => {
       challengeId: id,
       type: 'challenge_started',
       timestamp: new Date(),
-      description: `El juez ha aceptado la asignación. El desafío ahora está en progreso.`
+      description: `El juez ha aceptado la asignación. El desafío ahora está en progreso.`,
+      userId: userId
     }, { transaction });
 
     // Otorgar puntos al usuario por actuar como juez
@@ -326,7 +328,8 @@ exports.rejectJudgeAssignment = async (req, res) => {
       challengeId: id,
       type: 'judge_rejected',
       timestamp: new Date(),
-      description: `El juez ha rechazado la asignación. Se requiere asignar un nuevo juez.`
+      description: `El juez ha rechazado la asignación. Se requiere asignar un nuevo juez.`,
+      userId: userId
     }, { transaction });
 
     await transaction.commit();
@@ -447,7 +450,8 @@ exports.judgeVerdict = async (req, res) => {
       challengeId: id,
       type: 'judge_verdict',
       timestamp: new Date(),
-      description: `El juez ha emitido su veredicto. El desafío ha sido completado.`
+      description: `El juez ha emitido su veredicto. El desafío ha sido completado.`,
+      userId: userId
     }, { transaction });
 
     // Otorgar puntos adicionales al juez por completar su tarea
@@ -550,7 +554,8 @@ exports.requestJudging = async (req, res) => {
       challengeId: id,
       type: 'judging_requested',
       timestamp: new Date(),
-      description: `Un participante ha solicitado la revisión del juez.`
+      description: `Un participante ha solicitado la revisión del juez.`,
+      userId: userId
     }, { transaction });
 
     await transaction.commit();
@@ -639,7 +644,8 @@ exports.freezePrize = async (req, res) => {
       challengeId: id,
       type: 'prize_frozen',
       timestamp: new Date(),
-      description: `El juez ha congelado el premio del desafío.`
+      description: `El juez ha congelado el premio del desafío.`,
+      userId: userId
     }, { transaction });
 
     await transaction.commit();

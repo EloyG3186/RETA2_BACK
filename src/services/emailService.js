@@ -330,8 +330,8 @@ const sendVerificationEmail = async (user, token) => {
   const frontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split('|')[0].trim() : 'http://localhost:3000';
   console.log('URL del frontend:', frontendUrl);
   
-  // Construir la URL de verificación correctamente
-  const verificationUrl = `${frontendUrl}/verify-email/${token}`;
+  // Construir la URL de verificación correctamente con email como parámetro
+  const verificationUrl = `${frontendUrl}/verify-email/${token}?email=${encodeURIComponent(user.email)}`;
   
   // URL alternativa para verificar directamente por email (solo para desarrollo)
   const directVerificationUrl = `${process.env.BACKEND_URL || 'http://localhost:5001'}/api/users/verify-email-by-email/${user.email}`;

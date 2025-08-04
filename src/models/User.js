@@ -71,6 +71,34 @@ const User = sequelize.define('User', {
   verificationTokenExpires: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  // Campos para sistema de eliminación de cuenta
+  accountStatus: {
+    type: DataTypes.ENUM('active', 'deactivated', 'privacy_deleted', 'audit_retained', 'legal_hold', 'suspended'),
+    defaultValue: 'active',
+    allowNull: false
+  },
+  privacyLevel: {
+    type: DataTypes.ENUM('public', 'restricted', 'audit_only'),
+    defaultValue: 'public',
+    allowNull: false
+  },
+  deactivatedAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  privacyDeletedAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  auditRetention: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    allowNull: false
+  },
+  legalHoldUntil: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
   }
 }, {
   hooks: {

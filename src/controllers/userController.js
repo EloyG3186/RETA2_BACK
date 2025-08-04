@@ -1213,3 +1213,47 @@ exports.getUsersByIds = async (req, res) => {
     });
   }
 };
+
+// Obtener recomendaciones de desafíos para el usuario
+exports.getRecommendations = async (req, res) => {
+  try {
+    const userId = req.params.userId || req.user.id;
+    console.log('🎯 [getRecommendations] Obteniendo recomendaciones para usuario:', userId);
+    
+    const { Challenge, Category } = require('../models');
+    const { Op } = require('sequelize');
+    
+    // Por ahora, simplemente devolver desafíos disponibles como recomendaciones
+    const recommendedChallenges = await Challenge.findAll({
+      order: [['createdAt', 'DESC']],
+      limit: 6
+    });
+    
+    // Formatear respuesta
+    const formattedRecommendations = recommendedChallenges.map(challenge => ({
+      id: challenge.id,
+      title: challenge.title,
+      description: challenge.description,
+      category: 'General',
+      difficulty: challenge.difficulty || 'medium',
+      amount: challenge.amount || 0,
+      opponent: 'Sistema',
+      participantCount: 0
+    }));
+    
+    console.log('🎯 [getRecommendations] Recomendaciones encontradas:', formattedRecommendations.length);
+    
+    res.status(200).json({
+      success: true,
+      data: formattedRecommendations
+    });
+    
+  } catch (error) {
+    console.error('❌ [getRecommendations] Error al obtener recomendaciones:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener recomendaciones',
+      error: error.message
+    });
+  }
+};

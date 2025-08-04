@@ -234,6 +234,50 @@ const gamificationService = {
       console.error('Error al verificar insignias de juez:', error);
       return { success: false, error: error.message };
     }
+  },
+
+  /**
+   * Obtener puntos y nivel de un usuario
+   * @param {string} userId - ID del usuario
+   * @returns {Promise<Object>} Puntos y nivel del usuario
+   */
+  getUserPoints: async (userId) => {
+    try {
+      // Buscar o crear puntos del usuario
+      let [userPoints, created] = await UserPoints.findOrCreate({
+        where: { userId },
+        defaults: { total: 0, level: 1 }
+      });
+
+      // Calcular nivel basado en puntos totales
+      const newLevel = Math.floor(1 + Math.cbrt(userPoints.total / 100));
+      
+      // Actualizar nivel si ha cambiado
+      if (newLevel !== userPoints.level) {
+        await userPoints.update({ level: newLevel });
+        userPoints.level = newLevel;
+      }
+
+      // Calcular puntos necesarios para el siguiente nivel
+      const nextLevelPoints = Math.pow(userPoints.level, 3) * 100;
+      const pointsToNext = nextLevelPoints - userPoints.total;
+      
+      // Calcular progreso hacia el siguiente nivel
+      const currentLevelPoints = Math.pow(userPoints.level - 1, 3) * 100;
+      const progress = userPoints.total > currentLevelPoints 
+        ? Math.round(((userPoints.total - currentLevelPoints) / (nextLevelPoints - currentLevelPoints)) * 100)
+        : 0;
+
+      return {
+        total: userPoints.total,
+        level: userPoints.level,
+        nextLevelPoints: pointsToNext,
+        progress: Math.min(progress, 100)
+      };
+    } catch (error) {
+      console.error('Error al obtener puntos del usuario:', error);
+      throw error;
+    }
   }
 };
 

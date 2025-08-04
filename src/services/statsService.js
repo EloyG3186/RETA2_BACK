@@ -45,7 +45,7 @@ const getUserActivitySummary = async (userId, period) => {
           { userId: userId },
           { opponentId: userId }
         ],
-        status: { [Op.in]: ['active', 'pending'] },
+        status: { [Op.in]: ['in_progress', 'judging', 'pending'] },
         createdAt: { [Op.between]: [startDate, today] }
       },
       order: [['createdAt', 'DESC']]

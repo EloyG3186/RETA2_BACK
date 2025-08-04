@@ -1,5 +1,7 @@
 console.log('🚀 Iniciando aplicación Challenge Friends Backend...');
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const { sequelize } = require('./config/database');
@@ -25,8 +27,11 @@ const avatarRoutes = require('./routes/avatarRoutes'); // Nuevas rutas para avat
 const diagnosticRoutes = require('./routes/diagnosticRoutes'); // Rutas de diagnóstico para avatares
 const uploadRoutes = require('./routes/uploadRoutes'); // Rutas generales de upload
 const activityRoutes = require('./routes/activityRoutes'); // Rutas de actividad del usuario
+const dashboardRoutes = require('./routes/dashboardRoutes'); // Rutas del dashboard
+const accountDeletionRoutes = require('./routes/accountDeletionRoutes'); // Rutas de eliminación de cuenta
 const { setupChallengeCronJobs } = require('./cron/challengeCron');
 const { setupActivitySummaryCronJobs } = require('./cron/activitySummaryCron');
+const { setupAccountDeletionCronJobs } = require('./cron/accountDeletionCron');
 
 // Importar todos los modelos para asegurar que se registren correctamente
 const models = require('./models');
@@ -39,7 +44,10 @@ const app = express();
 const PORT = config.server.port;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true
+}));
 app.use(express.json());
 
 // Servir archivos estáticos desde la carpeta 'public'
@@ -52,6 +60,7 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/evidences', evidenceRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/judge', judgeRoutes);
 app.use('/api/gamification', gamificationRoutes);
 app.use('/api/rewards', require('./routes/rewards')); // Rutas de recompensas
@@ -65,6 +74,7 @@ app.use('/api/upload', uploadRoutes);
 
 // Rutas MongoDB (sociales)
 app.use('/api/chats', chatRoutes);
+app.use('/api/messages', require('./routes/messageRoutes')); // Rutas de mensajes (alias para chats)
 app.use('/api/communities', communityRoutes);
 app.use('/api/testimonials', testimonialRoutes);
 app.use('/api/friends', friendNetworkRoutes);
@@ -75,6 +85,9 @@ app.use('/api/notifications', notificationRoutes);
 
 // Rutas de actividad del usuario
 app.use('/api/activity', activityRoutes);
+
+// Rutas de eliminación y recuperación de cuenta
+app.use('/api/account-deletion', accountDeletionRoutes);
 
 // Rutas de prueba (sin autenticación para facilitar debug)
 app.use('/test', testRoutes);
@@ -89,33 +102,94 @@ app.get('/', (req, res) => {
 
 // Función para iniciar el servidor
 const startServer = () => {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor ejecutándose en el puerto ${PORT}`);
+  // Crear servidor HTTP
+  const server = http.createServer(app);
+  
+  // Configurar Socket.IO
+  const io = new Server(server, {
+    cors: {
+      origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+      methods: ["GET", "POST"],
+      credentials: true
+    }
+  });
+  
+  // Configurar eventos de Socket.IO
+  io.on('connection', (socket) => {
+    console.log('🔌 Cliente conectado a Socket.IO:', socket.id);
+    
+    // Autenticación del socket
+    const token = socket.handshake.auth.token;
+    if (token) {
+      // Aquí puedes verificar el token JWT si es necesario
+      console.log('🔐 Socket autenticado con token');
+    }
+    
+    // Manejar desconexión
+    socket.on('disconnect', (reason) => {
+      console.log('🔌 Cliente desconectado:', socket.id, 'Razón:', reason);
+    });
+    
+    // Ejemplo de evento personalizado
+    socket.on('join_room', (room) => {
+      socket.join(room);
+      console.log(`🏠 Socket ${socket.id} se unió a la sala: ${room}`);
+    });
+  });
+  
+  // Hacer io accesible globalmente para otros módulos
+  global.io = io;
+  
+  // Iniciar el servidor
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Servidor ejecutándose en el puerto ${PORT}`);
+    console.log(`🌐 API disponible en: http://localhost:${PORT}`);
+    console.log('🔌 Socket.IO configurado y listo');
+    console.log('🔄 Servidor listo para recibir peticiones');
   });
   
   // Configurar tareas programadas
   setupChallengeCronJobs();
   setupActivitySummaryCronJobs();
+  setupAccountDeletionCronJobs();
+  
+  // Manejo de cierre graceful
+  process.on('SIGINT', () => {
+    console.log('\n🛑 Cerrando servidor...');
+    server.close(() => {
+      console.log('✅ Servidor cerrado correctamente');
+      process.exit(0);
+    });
+  });
+  
+  process.on('SIGTERM', () => {
+    console.log('\n🛑 Señal SIGTERM recibida, cerrando servidor...');
+    server.close(() => {
+      console.log('✅ Servidor cerrado correctamente');
+      process.exit(0);
+    });
+  });
+  
+  return server;
 };
 
 // Conectar a PostgreSQL y MongoDB
 const initializeDatabases = async () => {
-  console.log('🔄 Entrando a initializeDatabases...');
   try {
-    console.log('🔄 Iniciando configuración de asociaciones...');
-    // Configurar asociaciones entre modelos
-    console.log('🔄 Configurando asociaciones de modelos...');
-    setupAssociations();
-    console.log('✅ Asociaciones entre modelos configuradas');
+    // Configurar asociaciones entre modelos con manejo de errores
+    try {
+      setupAssociations();
+      console.log('✅ Asociaciones entre modelos configuradas');
+    } catch (assocError) {
+      console.warn('⚠️ Error en asociaciones:', assocError.message);
+      console.warn('Continuando sin asociaciones...');
+    }
     
     // Sincronizar modelos con PostgreSQL
-    console.log('🔄 Sincronizando base de datos PostgreSQL...');
-    // Temporalmente deshabilitamos alter para evitar conflictos de restricciones
     await sequelize.sync({ force: false });
     console.log('✅ Base de datos PostgreSQL sincronizada correctamente');
     
     // Conectar a MongoDB
-    console.log('🔄 Conectando a MongoDB...');
     const mongoConnected = await connectMongoDB();
     if (mongoConnected) {
       console.log('✅ Conexión a MongoDB establecida correctamente');
@@ -124,9 +198,7 @@ const initializeDatabases = async () => {
     }
     
     // Iniciar el servidor después de conectar a las bases de datos
-    console.log('🚀 Iniciando servidor...');
     startServer();
-    console.log('✅ Servidor iniciado correctamente');
   } catch (err) {
     console.error('❌ Error al inicializar las bases de datos:', err);
     process.exit(1);
@@ -134,6 +206,15 @@ const initializeDatabases = async () => {
 };
 
 // Iniciar la aplicación
-console.log('🔄 Iniciando proceso de inicialización...');
+// Capturar errores no manejados para evitar cierres inesperados
+process.on('uncaughtException', (err) => {
+  console.error('❌ Error no manejado:', err);
+  console.log('⚠️ El servidor continuará funcionando...');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promesa rechazada no manejada:', reason);
+  console.log('⚠️ El servidor continuará funcionando...');
+});
+
 initializeDatabases();
-console.log('✅ Proceso de inicialización completado');

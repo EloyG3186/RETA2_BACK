@@ -13,9 +13,9 @@ exports.authenticate = async (req, res, next) => {
       console.warn('Acceso sin token de autorización válido');
       // En desarrollo, crear un usuario de prueba para permitir acceso a las APIs
       req.user = {
-        id: '0b4cb600-e339-4aa6-bdac-8ec24f73f112', // ID del juez EloyG5 para pruebas
-        username: 'EloyG5',
-        email: 'eloy.gonzalezja5@gmail.com',
+        id: '91f709ca-3830-488c-9168-fbe5bd68ba90', // ID del usuario EloyG para pruebas
+        username: 'EloyG',
+        email: 'eloy.gonzalezja2@gmail.com',
         isActive: true
       };
       console.log('Usuario de prueba creado:', req.user);
@@ -38,9 +38,9 @@ exports.authenticate = async (req, res, next) => {
       console.warn('Usuario no encontrado en la base de datos a pesar de tener un token válido');
       // En desarrollo, crear un usuario de prueba para permitir acceso a las APIs
       req.user = {
-        id: '0b4cb600-e339-4aa6-bdac-8ec24f73f112', // ID del juez EloyG5 para pruebas
-        username: 'EloyG5',
-        email: 'eloy.gonzalezja5@gmail.com',
+        id: '91f709ca-3830-488c-9168-fbe5bd68ba90', // ID del usuario EloyG para pruebas
+        username: 'EloyG',
+        email: 'eloy.gonzalezja2@gmail.com',
         isActive: true
       };
       console.log('Usuario de prueba creado:', req.user);
@@ -70,9 +70,9 @@ exports.authenticate = async (req, res, next) => {
       console.warn('Token inválido. En modo desarrollo, permitiendo acceso con usuario de prueba.');
       // En desarrollo, crear un usuario de prueba para permitir acceso a las APIs
       req.user = {
-        id: '0b4cb600-e339-4aa6-bdac-8ec24f73f112', // ID del juez EloyG5 para pruebas
-        username: 'EloyG5',
-        email: 'eloy.gonzalezja5@gmail.com',
+        id: '91f709ca-3830-488c-9168-fbe5bd68ba90', // ID del usuario EloyG para pruebas
+        username: 'EloyG',
+        email: 'eloy.gonzalezja2@gmail.com',
         isActive: true
       };
       return next();

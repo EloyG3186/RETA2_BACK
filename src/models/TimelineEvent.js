@@ -27,7 +27,9 @@ module.exports = (sequelize) => {
         'challenge_disputed',
         'judge_assigned',
         'judge_verdict',
-        'challenge_cancelled'
+        'challenge_cancelled',
+        'challenge_closed',
+        'judging_started'
       ),
       allowNull: false
     },
@@ -39,6 +41,15 @@ module.exports = (sequelize) => {
     description: {
       type: DataTypes.TEXT,
       allowNull: false
+    },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: 'userId', // Mapear explícitamente al nombre correcto de la columna
+      references: {
+        model: 'users',
+        key: 'id'
+      }
     }
   }, {
     tableName: 'timeline_events',
@@ -49,6 +60,11 @@ module.exports = (sequelize) => {
     TimelineEvent.belongsTo(models.Challenge, {
       foreignKey: 'challengeId',
       as: 'challenge'
+    });
+    
+    TimelineEvent.belongsTo(models.User, {
+      foreignKey: 'userId',
+      as: 'user'
     });
   };
 

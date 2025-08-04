@@ -12,7 +12,7 @@ exports.finalizeChallenges = async () => {
     const now = new Date();
     const expiredChallenges = await Challenge.findAll({
       where: {
-        status: 'active',
+        status: 'in_progress',
         endDate: { [Op.lt]: now }
       }
     });

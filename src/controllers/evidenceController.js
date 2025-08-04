@@ -1,4 +1,4 @@
-const { Evidence, Challenge, User, sequelize, TimelineEvent } = require('../models');
+const { Evidence, Challenge, User, sequelize, TimelineEvent, EvidenceRuleCompliance, Rule } = require('../models');
 const notificationController = require('./notificationController');
 
 // Crear una nueva evidencia (sin archivo)
@@ -67,7 +67,8 @@ exports.createEvidence = async (req, res) => {
       challengeId,
       type: 'evidence_submitted',
       description: `${user.fullName} (${user.username}) subió nueva evidencia: ${description || 'Sin descripción'}`,
-      timestamp: new Date()
+      timestamp: new Date(),
+      userId: user.id
     }, { transaction });
 
     console.log(`📋 [createEvidence] Evento de timeline creado: ${timelineEvent.id}`);
@@ -156,13 +157,12 @@ exports.createEvidenceWithFile = async (req, res) => {
       });
     }
 
-    // Verificar que el desafío permite subir evidencias
-    const allowedStatuses = ['in_progress', 'judge_assigned'];
-    if (!allowedStatuses.includes(challenge.status)) {
+    // Verificar que el desafío está en progreso
+    if (challenge.status !== 'in_progress') {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: `Solo se pueden añadir evidencias a desafíos en progreso o con juez asignado. Estado actual: ${challenge.status}`
+        message: `Solo se pueden añadir evidencias a desafíos en progreso. Estado actual: ${challenge.status}. El juez debe aceptar primero.`
       });
     }
 
@@ -266,15 +266,27 @@ exports.getChallengeEvidences = async (req, res) => {
     
     console.log(`📊 [getChallengeEvidences] Evidencias encontradas (sin include): ${evidences.length}`);
     
-    // Si hay evidencias, intentar obtener los usuarios por separado
+    // Si hay evidencias, intentar obtener los usuarios y reglas vinculadas por separado
     const evidencesWithUsers = [];
     for (const evidence of evidences) {
       const user = await User.findByPk(evidence.userId, {
         attributes: ['id', 'username', 'fullName', 'profilePicture']
       });
+      
+      // Obtener reglas vinculadas a esta evidencia
+      const linkedRules = await EvidenceRuleCompliance.findAll({
+        where: { evidenceId: evidence.id },
+        include: [{
+          model: Rule,
+          as: 'rule',
+          attributes: ['id', 'description', 'isMandatory']
+        }]
+      });
+      
       evidencesWithUsers.push({
         ...evidence.toJSON(),
-        submitter: user
+        submitter: user,
+        linkedRules: linkedRules.map(link => link.rule)
       });
     }
 
@@ -428,7 +440,8 @@ exports.updateEvidenceStatus = async (req, res) => {
       challengeId: evidence.challengeId,
       type: `evidence_${status}`,
       description: `${user.fullName} (${user.username}) ${statusText} la evidencia de ${evidence.user.fullName}`,
-      timestamp: new Date()
+      timestamp: new Date(),
+      userId: user.id
     }, { transaction });
 
     // Enviar notificación al usuario que subió la evidencia

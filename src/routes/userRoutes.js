@@ -25,6 +25,7 @@ router.get('/non-friends', authenticate, userController.getNonFriends);
 router.get('/common-friends', authenticate, userController.getCommonFriends);
 router.get('/search', authenticate, userController.searchUsers);
 router.post('/by-ids', authenticate, userController.getUsersByIds);
+router.get('/:userId/recommendations', authenticate, userController.getRecommendations);
 
 // Rutas para administradores
 // Ejemplo: router.get('/all', authenticate, authorize(['admin']), userController.getAllUsers);

@@ -1,7 +1,8 @@
-const { Op } = require('sequelize');
-const { sequelize, Challenge, User, Participant, Comment, TimelineEvent, Category } = require('../models');
+const { Op, Transaction } = require('sequelize');
+const { sequelize, Challenge, User, Participant, Comment, TimelineEvent, Category, Rule, Evidence, RuleCompliance, EvidenceRuleCompliance } = require('../models');
 const notificationController = require('./notificationController');
 const gamificationService = require('../services/gamificationService');
+const ruleEvaluationService = require('../services/ruleEvaluationService');
 
 /**
  * Normaliza los datos del retador en un desafío
@@ -122,16 +123,122 @@ async function normalizeChallenger(challenge) {
   }
 }
 
+// Crear reglas para un desafío existente
+exports.addChallengeRules = async (req, res) => {
+  console.log('🚀 [addChallengeRules] INICIO - Función llamada');
+  
+  try {
+    const { id: challengeId } = req.params;
+    const { rules } = req.body;
+    
+    console.log('📍 [addChallengeRules] Parámetros recibidos:');
+    console.log('  - challengeId:', challengeId);
+    console.log('  - rules:', rules);
+    console.log('  - req.user:', req.user);
+    
+    // Validar que el desafío existe
+    console.log('🔍 [addChallengeRules] Buscando desafío en base de datos...');
+    
+    let challenge;
+    try {
+      challenge = await Challenge.findByPk(challengeId);
+      console.log('🔍 [addChallengeRules] Resultado de búsqueda:', challenge ? 'ENCONTRADO' : 'NO ENCONTRADO');
+    } catch (dbError) {
+      console.error('❌ [addChallengeRules] Error en consulta de base de datos:', dbError);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error al consultar la base de datos',
+        error: dbError.message 
+      });
+    }
+    
+    if (!challenge) {
+      console.log('❌ [addChallengeRules] Desafío no encontrado');
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Desafío no encontrado' 
+      });
+    }
+    
+    console.log('✅ [addChallengeRules] Desafío encontrado:');
+    console.log('  - ID:', challenge.id);
+    console.log('  - Título:', challenge.title);
+    console.log('  - CreatorId:', challenge.creatorId);
+    console.log('  - Tipo creatorId:', typeof challenge.creatorId);
+    
+    // Validar usuario
+    console.log('🔍 [addChallengeRules] Validando usuario:');
+    console.log('  - req.user.id:', req.user.id);
+    console.log('  - Tipo req.user.id:', typeof req.user.id);
+    console.log('  - Comparación ===:', challenge.creatorId === req.user.id);
+    console.log('  - Comparación ==:', challenge.creatorId == req.user.id);
+    
+    if (challenge.creatorId !== req.user.id) {
+      console.log('❌ [addChallengeRules] AUTORIZACIÓN FALLIDA');
+      console.log('  - Expected:', challenge.creatorId);
+      console.log('  - Received:', req.user.id);
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Solo el creador puede agregar reglas al desafío' 
+      });
+    }
+    
+    console.log('✅ [addChallengeRules] AUTORIZACIÓN EXITOSA');
+    
+    // Validar reglas
+    console.log('🔍 [addChallengeRules] Validando reglas...');
+    if (!rules || !Array.isArray(rules) || rules.length === 0) {
+      console.log('❌ [addChallengeRules] Reglas inválidas');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Se requiere un array de reglas válido' 
+      });
+    }
+    
+    console.log('✅ [addChallengeRules] Reglas válidas, creando...');
+    
+    // Crear las reglas
+    const createdRules = await ruleEvaluationService.createRulesForChallenge(challengeId, rules);
+    
+    console.log(`✅ [addChallengeRules] ÉXITO: ${createdRules.length} reglas creadas`);
+    
+    res.status(201).json({
+      success: true,
+      message: `${createdRules.length} reglas agregadas exitosamente`,
+      data: createdRules
+    });
+    
+  } catch (error) {
+    console.error('❌ [addChallengeRules] ERROR GENERAL:', error);
+    console.error('❌ [addChallengeRules] Stack trace:', error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error interno del servidor',
+      error: error.message 
+    });
+  }
+  
+  console.log('🏁 [addChallengeRules] FIN - Función terminada');
+};
+
 // Crear una nueva competencia
 exports.createChallenge = async (req, res) => {
+  // LOG TEMPRANO PARA DEBUG
+  console.log('🔴 [EARLY_DEBUG] === CREATECHALLENGE INICIADO ===');
+  console.log('🔴 [EARLY_DEBUG] req.body completo:', JSON.stringify(req.body, null, 2));
+  
   const transaction = await sequelize.transaction();
   try {
     const { 
       title, description, category, categoryId, startDate, endDate, 
-      stake, createdBy, challenger, status, isPublic, imageUrl 
+      stake, createdBy, challenger, status, isPublic, imageUrl, rules 
     } = req.body;
     
     console.log('🖼️ [createChallenge] imageUrl recibida:', imageUrl);
+    console.log('📋 [createChallenge] rules recibidas:', rules);
+    console.log('📋 [createChallenge] tipo de rules:', typeof rules);
+    console.log('📋 [createChallenge] es array rules:', Array.isArray(rules));
+    console.log('📋 [createChallenge] longitud de rules:', rules?.length);
     
     // Obtener el ID del creador del token JWT o usar el proporcionado
     const creatorId = req.user?.id || createdBy;
@@ -247,8 +354,37 @@ exports.createChallenge = async (req, res) => {
     await TimelineEvent.create({
       challengeId: challenge.id,
       type: 'challenge_created',
-      description: `Desafío "${title}" creado por ${creator?.fullName || creator?.username || 'Usuario'} (${creator?.username || 'N/A'})`
+      description: `Desafío "${title}" creado por ${creator?.fullName || creator?.username || 'Usuario'} (${creator?.username || 'N/A'})`,
+      userId: creatorId
     }, { transaction });
+
+    console.log('📋 [createChallenge] === VERIFICANDO REGLAS ===');
+    console.log('📋 [createChallenge] rules existe:', !!rules);
+    console.log('📋 [createChallenge] rules es array:', Array.isArray(rules));
+    console.log('📋 [createChallenge] rules length:', rules?.length);
+    console.log('📋 [createChallenge] condición completa:', rules && Array.isArray(rules) && rules.length > 0);
+    
+    // 📋 Crear reglas del desafío si se proporcionaron
+    if (rules && Array.isArray(rules) && rules.length > 0) {
+      console.log(`📋 [createChallenge] === ENTRANDO A CREAR REGLAS ===`);
+      console.log(`📋 [createChallenge] Creando ${rules.length} reglas para el desafío ${challenge.id}`);
+      try {
+        console.log(`📋 [createChallenge] Llamando a ruleEvaluationService.createRulesForChallenge...`);
+        const createdRules = await ruleEvaluationService.createRulesForChallenge(
+          challenge.id, 
+          rules, 
+          transaction
+        );
+        console.log(`✅ [createChallenge] ${createdRules.length} reglas creadas exitosamente`);
+      } catch (ruleError) {
+        console.error('❌ [createChallenge] Error al crear reglas:', ruleError);
+        console.error('❌ [createChallenge] Stack trace:', ruleError.stack);
+        throw ruleError; // Esto causará un rollback de la transacción
+      }
+    } else {
+      console.log('ℹ️ [createChallenge] No se proporcionaron reglas para este desafío');
+      console.log('ℹ️ [createChallenge] Razón: rules=', rules, ', esArray=', Array.isArray(rules), ', length=', rules?.length);
+    }
 
     // Preparar la respuesta con la información completa
     const responseData = challenge.toJSON();
@@ -522,13 +658,13 @@ exports.getChallenges = async (req, res) => {
       // Mapear entryFee a stake para compatibilidad frontend
       challengeData.stake = challengeData.entryFee;
       
-      // Formatear creador
+      // Formatear creador - preservar datos reales
       challengeData.createdBy = challengeData.creator || null;
       
-      // Formatear retador
-      challengeData.challenger = challengeData.challengerUser || { id: 'unknown', username: 'Sin retador' };
+      // Formatear retador - preservar datos reales
+      challengeData.challenger = challengeData.challengerUser || null;
       
-      // Formatear juez
+      // Formatear juez - preservar datos reales
       challengeData.judge = challengeData.judgeUser || null;
       
       // Procesar información de categoría
@@ -636,6 +772,12 @@ exports.getChallengeById = async (req, res) => {
             as: 'categoryInfo',
             attributes: ['id', 'name', 'description'],
             required: false // LEFT JOIN para manejar casos sin categoría
+          },
+          {
+            model: Rule,
+            as: 'challengeRules',
+            attributes: ['id', 'description', 'orderIndex', 'isMandatory'],
+            required: false // LEFT JOIN para manejar casos sin reglas
           }
         ]
       });
@@ -857,6 +999,12 @@ exports.getChallengeById = async (req, res) => {
         try {
           const timelineEvents = await TimelineEvent.findAll({
             where: { challengeId: id },
+            include: [{
+              model: User,
+              as: 'user',
+              attributes: ['id', 'username', 'fullName', 'profilePicture'],
+              required: false // LEFT JOIN para eventos sin usuario asociado
+            }],
             order: [['timestamp', 'DESC']] // Más recientes primero
           });
           
@@ -867,7 +1015,11 @@ exports.getChallengeById = async (req, res) => {
               id: event.id,
               type: event.type,
               description: event.description,
-              timestamp: event.timestamp
+              timestamp: event.timestamp,
+              userId: event.userId,
+              userName: event.user ? event.user.fullName : null,
+              userUsername: event.user ? event.user.username : null,
+              userAvatar: event.user ? event.user.profilePicture : null
             }));
             console.log(`📅 [getChallengeById] Timeline procesado con ${challengeJSON.timeline.length} eventos`);
           } else {
@@ -886,7 +1038,24 @@ exports.getChallengeById = async (req, res) => {
         challengeJSON.status = challengeJSON.status || 'pending';
         challengeJSON.startDate = challengeJSON.startDate || new Date().toISOString();
         challengeJSON.endDate = challengeJSON.endDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-        challengeJSON.rules = challengeJSON.rules || [];
+        // Procesar reglas si existen
+        if (challengeJSON.challengeRules && Array.isArray(challengeJSON.challengeRules)) {
+          // Ordenar reglas por orderIndex y mapear a 'rules' para el frontend
+          challengeJSON.rules = challengeJSON.challengeRules
+            .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0))
+            .map(rule => ({
+              id: rule.id,
+              description: rule.description,
+              orderIndex: rule.orderIndex || 0,
+              isMandatory: rule.isMandatory || false
+            }));
+          console.log(`📝 [getChallengeById] Reglas procesadas: ${challengeJSON.rules.length}`);
+          // Limpiar challengeRules ya que usamos rules
+          delete challengeJSON.challengeRules;
+        } else {
+          challengeJSON.rules = [];
+          console.log(`📝 [getChallengeById] No se encontraron reglas para el desafío`);
+        }
         challengeJSON.evidence = challengeJSON.evidence || [];
         challengeJSON.comments = challengeJSON.comments || [];
         challengeJSON.isPublic = challengeJSON.isPublic !== undefined ? challengeJSON.isPublic : true;
@@ -1152,7 +1321,8 @@ exports.joinChallenge = async (req, res) => {
     await TimelineEvent.create({
       challengeId: id,
       type: 'challenge_accepted',
-      description: `${user?.fullName || user?.username || 'Usuario'} (${user?.username || 'N/A'}) se unió al desafío`
+      description: `${user?.fullName || user?.username || 'Usuario'} (${user?.username || 'N/A'}) se unió al desafío`,
+      userId: userId
     }, { transaction });
 
     // Crear notificación para el creador del desafío
@@ -1215,12 +1385,13 @@ exports.determineWinner = async (req, res) => {
       });
     }
 
-    // Verificar que la competencia esté activa
-    if (challenge.status !== 'active') {
+    // Verificar que la competencia esté en un estado válido para determinar ganador
+    const validStatusesForWinner = ['in_progress', 'judging', 'completed'];
+    if (!validStatusesForWinner.includes(challenge.status)) {
       await transaction.rollback();
       return res.status(400).json({ 
         success: false, 
-        message: 'Only active challenges can have a winner determined' 
+        message: 'Only challenges in progress, judging, or completed can have a winner determined' 
       });
     }
 
@@ -1445,7 +1616,8 @@ exports.acceptChallenge = async (req, res) => {
         challengeId: id,
         type: 'challenge_accepted',
         timestamp: new Date(),
-        description: 'El desafío ha sido aceptado por todos los participantes. El creador debe asignar un juez.'
+        description: 'El desafío ha sido aceptado por todos los participantes. El creador debe asignar un juez.',
+        userId: userId
       }, { transaction });
       
       // Crear una notificación para el creador del desafío
@@ -1787,112 +1959,1101 @@ exports.getUserChallenges = async (req, res) => {
       categoryMapByName[cat.name] = cat.name;
     });
     
-    // Create a mapping for common category strings to display names
-    const categoryDisplayNames = {
-      'fitness': 'Fitness',
-      'learning': 'Aprendizaje', 
-      'creativity': 'Creatividad',
-      'health': 'Salud',
-      'productivity': 'Productividad',
-      'social': 'Social',
-      'entertainment': 'Entretenimiento'
-    };
-    
-    // Transform the data to match frontend expectations
-    const formattedChallenges = challenges.map(challenge => {
+    // Process challenges and normalize category information
+    const processedChallenges = challenges.map(challenge => {
       const challengeData = challenge.toJSON();
       
-      // Map category name using either category or categoryId field
-      const categoryValue = challengeData.category || challengeData.categoryId;
-      let categoryName = 'Sin categoría';
-      
-      if (categoryValue) {
-        // Check if it's a UUID (from database category)
-        if (uuidRegex.test(categoryValue)) {
-          categoryName = categoryMapById[categoryValue] || 'Sin categoría';
-        } else {
-          // It's a string category, check if we have it in our maps
-          categoryName = categoryMapByName[categoryValue] || categoryDisplayNames[categoryValue] || categoryValue;
-        }
+      // Normalize category information
+      if (challengeData.categoryId && categoryMapById[challengeData.categoryId]) {
+        challengeData.categoryName = categoryMapById[challengeData.categoryId];
+        challengeData.category = categoryMapById[challengeData.categoryId];
+      } else if (challengeData.category && categoryMapByName[challengeData.category]) {
+        challengeData.categoryName = categoryMapByName[challengeData.category];
+      } else {
+        challengeData.categoryName = challengeData.category || 'Sin categoría';
       }
       
-      console.log('Challenge category mapping:', {
-        challengeId: challengeData.id,
-        category: challengeData.category,
-        categoryId: challengeData.categoryId,
-        usedCategoryValue: categoryValue,
-        isUUID: categoryValue ? uuidRegex.test(categoryValue) : false,
-        mappedCategoryName: categoryName
-      });
-
-      return {
-        ...challengeData,
-        categoryName: categoryName,
-        // Ensure participant data is properly formatted
-        creator: challengeData.creator || { fullName: 'Usuario desconocido' },
-        challenger: challengeData.challengerUser || null,
-        judge: challengeData.judgeUser || null
-      };
+      // Add stake for frontend compatibility
+      challengeData.stake = challengeData.entryFee;
+      
+      return challengeData;
     });
 
-    console.log(`✅ Enviando ${formattedChallenges.length} desafíos formateados`);
+    console.log(`✅ Procesados ${processedChallenges.length} desafíos para el usuario`);
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      data: formattedChallenges,
-      count: formattedChallenges.length,
+      data: processedChallenges,
+      count: processedChallenges.length,
       message: 'Desafíos del usuario obtenidos exitosamente'
     });
-
   } catch (error) {
-    console.error('❌ Error obteniendo desafíos del usuario:', error);
+    console.error('❌ [getUserChallenges] Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Error obteniendo desafíos del usuario',
+      message: 'Error interno del servidor',
       error: error.message
     });
   }
 };
 
-// Función para subir imagen de desafío
+// =====================================
+// UPLOAD CHALLENGE IMAGE
+// =====================================
+
+// Subir imagen de desafío
 exports.uploadChallengeImage = async (req, res) => {
   try {
-    console.log('🖼️ [uploadChallengeImage] Procesando subida de imagen...');
+    console.log('📸 [uploadChallengeImage] Iniciando subida de imagen de desafío');
     
-    if (!req.uploadedImage) {
-      console.log('❌ [uploadChallengeImage] No se encontró imagen subida');
+    if (!req.file) {
       return res.status(400).json({
         success: false,
-        error: 'No se pudo procesar la imagen',
-        code: 'NO_IMAGE_PROCESSED'
+        message: 'No se proporcionó ningún archivo'
       });
     }
 
-    console.log('✅ [uploadChallengeImage] Imagen procesada exitosamente:');
-    console.log('   📄 Nombre:', req.uploadedImage.filename);
-    console.log('   📄 Original:', req.uploadedImage.originalname);
-    console.log('   📏 Tamaño:', req.uploadedImage.size, 'bytes');
-    console.log('   🌐 URL:', req.uploadedImage.url);
+    const imageUrl = `/uploads/challenges/${req.file.filename}`;
+    console.log('✅ [uploadChallengeImage] Imagen subida correctamente:', imageUrl);
 
-    // Responder con la información de la imagen
-    res.json({
+    res.status(200).json({
       success: true,
-      message: 'Imagen subida exitosamente',
+      message: 'Imagen subida correctamente',
       data: {
-        imageUrl: req.uploadedImage.url,
-        filename: req.uploadedImage.filename,
-        originalname: req.uploadedImage.originalname,
-        size: req.uploadedImage.size,
-        mimetype: req.uploadedImage.mimetype
+        imageUrl: imageUrl,
+        filename: req.file.filename
       }
     });
-
   } catch (error) {
     console.error('❌ [uploadChallengeImage] Error:', error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: 'Error interno al procesar la imagen',
+      message: 'Error interno del servidor',
       error: error.message
     });
   }
+};
+
+// =====================================
+// ENDPOINTS DEL SISTEMA DE REGLAS
+// =====================================
+
+// Obtener reglas de un desafío
+const getChallengeRules = async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📋 [getChallengeRules] Obteniendo reglas del desafío ${id}`);
+
+    // Importar el modelo Rule
+    const Rule = require('../models/Rule');
+    
+    const rules = await Rule.findAll({
+      where: { challengeId: id },
+      order: [['orderIndex', 'ASC']]
+    });
+
+    console.log(`✅ [getChallengeRules] ${rules.length} reglas encontradas`);
+    
+    res.json({
+      success: true,
+      message: 'Reglas obtenidas exitosamente',
+      data: rules
+    });
+  } catch (error) {
+    console.error('❌ [getChallengeRules] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener las reglas del desafío',
+      error: error.message
+    });
+  }
+};
+
+// Iniciar proceso de evaluación (cambiar estado a 'judging')
+const startJudging = async (req, res) => {
+  const { sequelize } = require('../config/database');
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`📋 [startJudging] Iniciando evaluación del desafío ${id}`);
+
+    // Los modelos ya están importados al inicio del archivo
+
+    // Buscar el desafío
+    const challenge = await Challenge.findByPk(id, { transaction });
+    if (!challenge) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Desafío no encontrado'
+      });
+    }
+
+    // Verificar que el usuario es el juez del desafío
+    if (challenge.judgeId !== userId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Solo el juez asignado puede iniciar la evaluación'
+      });
+    }
+
+    // Verificar que el desafío está en estado 'closed'
+    if (challenge.status !== 'closed') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Solo se puede iniciar la evaluación de desafíos cerrados'
+      });
+    }
+
+    // SOLUCIÓN DEFINITIVA: Verificar evidencias con READ committed para evitar datos obsoletos
+    console.log(`🔍 [startJudging] Verificando evidencias pendientes para desafío ${id}`);
+    
+    // IMPORTANTE: Commit la transacción actual para evitar lecturas obsoletas
+    await transaction.commit();
+    
+    // Crear nueva transacción con READ committed para lecturas frescas
+    const freshTransaction = await sequelize.transaction({
+      isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED
+    });
+    
+    try {
+      // Obtener TODAS las evidencias con datos frescos (sin transacción previa)
+      const allEvidences = await Evidence.findAll({
+        where: { challengeId: id },
+        include: [{
+          model: User,
+          as: 'user',
+          attributes: ['id', 'fullName', 'username']
+        }],
+        transaction: freshTransaction,
+        // Forzar lectura fresca de la base de datos
+        paranoid: false,
+        raw: false
+      });
+      
+      console.log(`📊 [DEBUG] Total evidencias encontradas (lectura fresca): ${allEvidences.length}`);
+      allEvidences.forEach((evidence, index) => {
+        console.log(`📊 [DEBUG] Evidencia ${index + 1}: ID=${evidence.id}, Status=${evidence.status}, User=${evidence.user?.fullName || 'N/A'}, UpdatedAt=${evidence.updatedAt}`);
+      });
+      
+      // Verificar evidencias pendientes con datos frescos
+      const pendingEvidences = await Evidence.findAll({
+        where: { 
+          challengeId: id,
+          status: 'pending'
+        },
+        include: [{
+          model: User,
+          as: 'user',
+          attributes: ['id', 'fullName', 'username']
+        }],
+        transaction: freshTransaction
+      });
+
+      if (pendingEvidences.length > 0) {
+        console.log(`❌ [startJudging] Encontradas ${pendingEvidences.length} evidencias pendientes`);
+        
+        await freshTransaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `No se puede iniciar la evaluación. Hay ${pendingEvidences.length} evidencia(s) pendiente(s) de procesar.`,
+          details: {
+            pendingEvidencesCount: pendingEvidences.length,
+            pendingEvidences: pendingEvidences.map(evidence => ({
+              id: evidence.id,
+              description: evidence.description.substring(0, 50) + (evidence.description.length > 50 ? '...' : ''),
+              submitter: evidence.user?.fullName || evidence.user?.username || 'Usuario desconocido',
+              createdAt: evidence.createdAt
+            })),
+            requirement: 'Todas las evidencias deben estar aprobadas o rechazadas antes de iniciar la evaluación de reglas'
+          }
+        });
+      }
+
+      console.log(`✅ [startJudging] Todas las evidencias están procesadas. Procediendo con la evaluación.`);
+
+      // Recargar el challenge con la nueva transacción
+      const freshChallenge = await Challenge.findByPk(id, {
+        transaction: freshTransaction
+      });
+
+      // Actualizar el estado del desafío a 'judging'
+      await freshChallenge.update({
+        status: 'judging',
+        judgingStartedAt: new Date()
+      }, { transaction: freshTransaction });
+
+      // 🤖 EJECUTAR AUTO-EVALUACIÓN DE REGLAS SIN EVIDENCIAS VÁLIDAS
+      console.log(`🤖 [startJudging] Ejecutando auto-evaluación de reglas sin evidencias válidas...`);
+      
+      const autoEvaluationResult = await autoEvaluateRulesWithoutValidEvidence(id, userId, freshTransaction);
+      
+      console.log(`✅ [startJudging] Auto-evaluación completada: ${autoEvaluationResult.autoEvaluatedCount} reglas auto-evaluadas`);
+
+      // Crear evento de timeline
+      const judge = await User.findByPk(userId, {
+        attributes: ['fullName', 'username'],
+        transaction: freshTransaction
+      });
+      
+      await TimelineEvent.create({
+        challengeId: id,
+        type: 'judging_started',
+        description: `El juez ${judge?.fullName || judge?.username || 'Juez'} inició la evaluación del desafío.`,
+        userId: userId
+      }, { transaction: freshTransaction });
+
+      await freshTransaction.commit();
+      
+      console.log(`✅ [startJudging] Evaluación iniciada exitosamente para desafío ${id}`);
+      
+      // Preparar mensaje de respuesta con información de auto-evaluación
+      let responseMessage = 'Evaluación iniciada exitosamente';
+      if (autoEvaluationResult.autoEvaluatedCount > 0) {
+        responseMessage += `. ${autoEvaluationResult.autoEvaluatedCount} regla(s) fueron auto-evaluadas como "No Cumple" por falta de evidencias aprobadas.`;
+      }
+      
+      res.json({
+        success: true,
+        message: responseMessage,
+        data: {
+          id: freshChallenge.id,
+          status: 'judging',
+          judgingStartedAt: freshChallenge.judgingStartedAt,
+          autoEvaluation: {
+            rulesAutoEvaluated: autoEvaluationResult.autoEvaluatedCount,
+            message: autoEvaluationResult.message
+          }
+        }
+      });
+      
+    } catch (error) {
+      await freshTransaction.rollback();
+      console.error('❌ [startJudging] Error en transacción fresca:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Error al iniciar la evaluación',
+        error: error.message
+      });
+    }
+  } catch (error) {
+    // Error en la transacción original (ya fue committed)
+    console.error('❌ [startJudging] Error general:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al iniciar la evaluación',
+      error: error.message
+    });
+  }
+};
+
+// Evaluar cumplimiento de una regla específica
+const evaluateRule = async (req, res) => {
+  const { sequelize } = require('../config/database');
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const { id: challengeId, ruleId } = req.params;
+    const { participantId, isCompliant, judgeComments } = req.body;
+    const judgeId = req.user.id;
+    
+    console.log(`📋 [evaluateRule] Evaluando regla ${ruleId} para participante ${participantId}`);
+
+    // Importar modelos necesarios
+    const Rule = require('../models/Rule');
+    const RuleCompliance = require('../models/RuleCompliance');
+    const Challenge = require('../models/Challenge');
+    
+    // Verificar que la regla existe y pertenece al desafío
+    const rule = await Rule.findOne({
+      where: { id: ruleId, challengeId },
+      transaction
+    });
+    
+    if (!rule) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Regla no encontrada'
+      });
+    }
+
+    // Verificar que el desafío está en estado 'judging'
+    const challenge = await Challenge.findByPk(challengeId, { transaction });
+    if (!challenge || challenge.status !== 'judging') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Solo se pueden evaluar reglas durante la fase de evaluación'
+      });
+    }
+
+    // Verificar que el usuario es el juez
+    if (challenge.judgeId !== judgeId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Solo el juez asignado puede evaluar reglas'
+      });
+    }
+
+    // Crear o actualizar la evaluación de cumplimiento
+    const [compliance, created] = await RuleCompliance.findOrCreate({
+      where: {
+        ruleId,
+        participantId
+      },
+      defaults: {
+        judgeId,
+        isCompliant,
+        judgeComments,
+        evaluatedAt: new Date()
+      },
+      transaction
+    });
+
+    if (!created) {
+      await compliance.update({
+        judgeId,
+        isCompliant,
+        judgeComments,
+        evaluatedAt: new Date()
+      }, { transaction });
+    }
+
+    await transaction.commit();
+    
+    console.log(`✅ [evaluateRule] Regla evaluada exitosamente`);
+    
+    res.json({
+      success: true,
+      message: 'Regla evaluada exitosamente',
+      data: {
+        ruleId,
+        participantId,
+        isCompliant,
+        judgeComments,
+        evaluatedAt: compliance.evaluatedAt
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ [evaluateRule] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al evaluar la regla',
+      error: error.message
+    });
+  }
+};
+
+// =====================================
+// ADDITIONAL CHALLENGE MANAGEMENT
+// =====================================
+
+// Cerrar un desafío (solo juez)
+const closeChallenge = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    console.log(`🔒 [closeChallenge] Cerrando desafío ${id} por usuario ${userId}`);
+
+    // Buscar el desafío
+    const challenge = await Challenge.findByPk(id, { transaction });
+    if (!challenge) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Desafío no encontrado'
+      });
+    }
+
+    // Verificar que el usuario sea el juez
+    if (challenge.judgeId !== userId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Solo el juez puede cerrar el desafío'
+      });
+    }
+
+    // Verificar que el desafío esté en progreso
+    if (challenge.status !== 'in_progress') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `No se puede cerrar un desafío en estado '${challenge.status}'`
+      });
+    }
+
+    // Actualizar el estado a 'closed'
+    await challenge.update({
+      status: 'closed',
+      closedAt: new Date()
+    }, { transaction });
+
+    // Crear evento en timeline
+    await TimelineEvent.create({
+      challengeId: id,
+      type: 'challenge_closed',
+      description: 'El desafío ha sido cerrado por el juez',
+      userId: userId
+    }, { transaction });
+
+    await transaction.commit();
+    console.log(`✅ [closeChallenge] Desafío ${id} cerrado correctamente`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Desafío cerrado correctamente',
+      data: {
+        challengeId: id,
+        status: 'closed',
+        closedAt: challenge.closedAt
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(`❌ [closeChallenge] Error:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      error: error.message
+    });
+  }
+};
+
+// Determinar ganador basado en reglas
+const determineWinnerByRules = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    console.log(`🏆 [determineWinnerByRules] Determinando ganador del desafío ${id}`);
+
+    // Buscar el desafío
+    const challenge = await Challenge.findByPk(id, { transaction });
+    if (!challenge) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Desafío no encontrado'
+      });
+    }
+
+    // Verificar que el usuario sea el juez
+    if (challenge.judgeId !== userId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Solo el juez puede determinar el ganador'
+      });
+    }
+
+    // Verificar que el desafío esté en estado 'judging'
+    if (challenge.status !== 'judging') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `El desafío debe estar en estado 'judging' para determinar el ganador. Estado actual: '${challenge.status}'`
+      });
+    }
+
+    // ASEGURAR QUE EXISTAN TODOS LOS REGISTROS RULECOMPLIANCE
+    console.log(`🔧 [determineWinnerByRules] Asegurando que existan todos los registros RuleCompliance...`);
+    await ensureAllRuleComplianceRecords(id, transaction);
+    
+    // NUEVA VALIDACIÓN: Verificar que todas las reglas estén evaluadas
+    console.log(`🔍 [determineWinnerByRules] ========== INICIANDO VALIDACIÓN ==========`);
+    console.log(`🔍 [determineWinnerByRules] Desafío ID: ${id}`);
+    console.log(`🔍 [determineWinnerByRules] Verificando completitud de evaluaciones...`);
+    
+    const judgeControlService = require('../services/judgeControlService');
+    const canDetermineResult = await judgeControlService.canDetermineWinner(id);
+    
+    console.log(`🔍 [determineWinnerByRules] Resultado de validación:`, {
+      canDetermine: canDetermineResult.canDetermine,
+      totalPending: canDetermineResult.totalPending,
+      totalRequired: canDetermineResult.totalRequired,
+      totalCompleted: canDetermineResult.totalCompleted
+    });
+    
+    if (!canDetermineResult.canDetermine) {
+      console.log(`❌ [determineWinnerByRules] VALIDACIÓN FALLIDA - No se puede determinar ganador`);
+      console.log(`❌ [determineWinnerByRules] Reglas pendientes: ${canDetermineResult.totalPending}`);
+      console.log(`❌ [determineWinnerByRules] Detalles de reglas pendientes:`, canDetermineResult.pendingRules);
+      
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `No se puede determinar el ganador. Faltan ${canDetermineResult.totalPending} regla(s) por evaluar.`,
+        details: {
+          totalPending: canDetermineResult.totalPending,
+          totalRequired: canDetermineResult.totalRequired,
+          totalCompleted: canDetermineResult.totalCompleted,
+          pendingRules: canDetermineResult.pendingRules.map(rule => ({
+            ruleId: rule.ruleId,
+            ruleDescription: rule.ruleDescription,
+            participantId: rule.participantId,
+            participantName: rule.participantName,
+            status: rule.status
+          })),
+          requirement: 'Todas las reglas deben estar evaluadas para todos los participantes antes de determinar el ganador',
+          nextSteps: [
+            'Ve a la sección "Evaluación" en la pestaña Juez',
+            'Evalúa cada regla marcando "Cumple" o "No Cumple" para cada participante',
+            'Una vez evaluadas todas las reglas, podrás determinar el ganador'
+          ]
+        }
+      });
+    }
+    
+    console.log(`✅ [determineWinnerByRules] VALIDACIÓN EXITOSA - Todas las reglas evaluadas. Procediendo con determinación de ganador.`);
+    
+    // Usar el servicio de determinación de ganador
+    try {
+      const winnerDeterminationService = require('../services/winnerDeterminationService');
+      const winnerResult = await winnerDeterminationService.determineWinnerByRules(id, transaction);
+      
+      console.log(`🏆 [determineWinnerByRules] Ganador determinado exitosamente`);
+      console.log(`🏆 [determineWinnerByRules] Resultado completo:`, winnerResult);
+      
+      // Actualizar el estado del desafío a 'completed'
+      await challenge.update({
+        status: 'completed',
+        completedAt: new Date()
+      }, { transaction });
+      
+      // Crear evento en timeline
+      const winnerName = winnerResult.isTie ? 'Empate' : 
+        (winnerResult.winnerName || `Participante ${winnerResult.winnerId}`);
+      
+      await TimelineEvent.create({
+        challengeId: id,
+        type: 'challenge_completed',
+        description: `Desafío completado. Ganador: ${winnerName}`,
+        userId: userId
+      }, { transaction });
+      
+      // Enviar notificaciones a todos los participantes
+      const participants = await Participant.findAll({
+        where: { challengeId: id },
+        include: [{
+          model: User,
+          as: 'user',
+          attributes: ['id', 'username', 'fullName', 'email']
+        }],
+        transaction
+      });
+      
+      await transaction.commit();
+      
+      // Enviar notificaciones después del commit (para evitar problemas de transacción)
+      for (const participant of participants) {
+        try {
+          const notificationController = require('./notificationController');
+          const isWinner = participant.id === winnerResult.winnerId;
+          
+          const notificationMessage = isWinner 
+            ? `🏆 ¡Felicidades! Has ganado el desafío "${challenge.title}". ${winnerResult.reason}`
+            : `📊 El desafío "${challenge.title}" ha terminado. Ganador: ${winnerName}. ${winnerResult.reason}`;
+          
+          await notificationController.createNotification({
+            body: {
+              userId: participant.user.id,
+              type: 'challenge_completed',
+              title: isWinner ? '🏆 ¡Has ganado!' : '📊 Desafío completado',
+              message: notificationMessage,
+              relatedId: id,
+              relatedType: 'challenge'
+            }
+          }, {
+            status: () => ({ json: () => {} })
+          });
+          
+          console.log(`📧 [determineWinnerByRules] Notificación enviada a ${participant.user.fullName} (${participant.user.username})`);
+        } catch (notifError) {
+          console.error(`❌ [determineWinnerByRules] Error enviando notificación a participante ${participant.user.id}:`, notifError);
+        }
+      }
+      
+      res.status(200).json({
+        success: true,
+        message: `Ganador determinado exitosamente: ${winnerName}`,
+        data: {
+          challengeId: id,
+          winnerId: winnerResult.winnerId,
+          winnerName: winnerResult.winnerName,
+          winnerReason: winnerResult.reason,
+          isTie: winnerResult.isTie,
+          completedAt: new Date(),
+          status: 'completed'
+        }
+      });
+      
+    } catch (winnerError) {
+      console.error(`❌ [determineWinnerByRules] Error en determinación de ganador:`, winnerError);
+      await transaction.rollback();
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Error al determinar el ganador',
+        error: winnerError.message,
+        details: {
+          step: 'winner_determination',
+          suggestion: 'Verifica que todas las evaluaciones estén correctamente guardadas en la base de datos'
+        }
+      });
+    }
+  } catch (error) {
+    await transaction.rollback();
+    console.error(`❌ [determineWinnerByRules] Error:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor',
+      error: error.message
+    });
+  }
+};
+
+// =====================================
+// AUTO-EVALUATION SYSTEM
+// =====================================
+
+/**
+ * Asegurar que existan todos los registros RuleCompliance necesarios
+ * @param {string} challengeId - ID del desafío
+ * @param {Object} transaction - Transacción de base de datos
+ * @returns {Promise<Object>} - Resultado de la operación
+ */
+const ensureAllRuleComplianceRecords = async (challengeId, transaction) => {
+  try {
+    console.log(`🔧 [ensureRecords] Asegurando registros RuleCompliance para desafío ${challengeId}`);
+    
+    // 1. Obtener todas las reglas del desafío
+    const rules = await Rule.findAll({
+      where: { challengeId },
+      transaction
+    });
+    
+    // 2. Obtener todos los participantes del desafío
+    const participants = await Participant.findAll({
+      where: { challengeId },
+      transaction
+    });
+    
+    console.log(`📊 [ensureRecords] Reglas: ${rules.length}, Participantes: ${participants.length}`);
+    
+    let createdCount = 0;
+    
+    // 3. Para cada combinación regla-participante
+    for (const rule of rules) {
+      for (const participant of participants) {
+        
+        // 4. Verificar si ya existe el registro
+        const existingRecord = await RuleCompliance.findOne({
+          where: {
+            ruleId: rule.id,
+            participantId: participant.id
+          },
+          transaction
+        });
+        
+        // 5. Si no existe, crear registro pendiente
+        if (!existingRecord) {
+          await RuleCompliance.create({
+            ruleId: rule.id,
+            participantId: participant.id,
+            judgeId: null,
+            isCompliant: null, // Pendiente de evaluación
+            judgeComments: null,
+            evaluatedAt: null,
+            autoEvaluated: false
+          }, { transaction });
+          
+          createdCount++;
+          console.log(`🆕 [ensureRecords] Creado registro pendiente: Regla "${rule.description}" para participante ${participant.id}`);
+        }
+      }
+    }
+    
+    console.log(`✅ [ensureRecords] Completado: ${createdCount} registros creados`);
+    
+    return {
+      success: true,
+      createdCount,
+      message: `${createdCount} registros RuleCompliance creados`
+    };
+    
+  } catch (error) {
+    console.error(`❌ [ensureRecords] Error:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Auto-evaluar reglas sin evidencias válidas como "No Cumple"
+ * @param {string} challengeId - ID del desafío
+ * @param {Object} transaction - Transacción de base de datos
+ * @returns {Promise<Object>} - Resultado de la auto-evaluación
+ */
+const autoEvaluateRulesWithoutValidEvidence = async (challengeId, judgeId, transaction) => {
+  try {
+    console.log(`🤖 [autoEvaluate] Iniciando auto-evaluación para desafío ${challengeId}`);
+    
+    // 1. Obtener todas las reglas del desafío
+    const rules = await Rule.findAll({
+      where: { challengeId },
+      transaction
+    });
+    
+    // 2. Obtener todos los participantes del desafío
+    const participants = await Participant.findAll({
+      where: { challengeId },
+      transaction
+    });
+    
+    console.log(`📊 [autoEvaluate] Encontradas ${rules.length} reglas y ${participants.length} participantes`);
+    
+    let autoEvaluatedCount = 0;
+    const autoEvaluations = [];
+    
+    // 3. Para cada combinación regla-participante
+    for (const rule of rules) {
+      for (const participant of participants) {
+        
+        // 4. Verificar si ya existe una evaluación
+        const existingEvaluation = await RuleCompliance.findOne({
+          where: {
+            ruleId: rule.id,
+            participantId: participant.id
+          },
+          transaction
+        });
+        
+        // Solo procesar si no existe evaluación previa
+        if (!existingEvaluation) {
+          
+          // 5. Buscar evidencias aprobadas vinculadas a esta regla para este participante
+          const approvedEvidences = await Evidence.findAll({
+            where: {
+              challengeId: challengeId,
+              userId: participant.userId,
+              status: 'approved'
+            },
+            include: [{
+              model: EvidenceRuleCompliance,
+              as: 'ruleCompliances',
+              where: { ruleId: rule.id },
+              required: true
+            }],
+            transaction
+          });
+          
+          console.log(`🔍 [autoEvaluate] Regla ${rule.id} - Participante ${participant.id}: ${approvedEvidences.length} evidencias aprobadas`);
+          
+          // 6. Crear registro RuleCompliance
+          if (approvedEvidences.length === 0) {
+            // Sin evidencias aprobadas → Auto-evaluar como "No Cumple"
+            const autoEvaluation = await RuleCompliance.create({
+              ruleId: rule.id,
+              participantId: participant.id,
+              judgeId: judgeId, // ID del juez que inicia la evaluación
+              isCompliant: false,
+              judgeComments: 'Auto-evaluado por el sistema: Sin evidencias aprobadas vinculadas a esta regla',
+              evaluatedAt: new Date(),
+              autoEvaluated: true
+            }, { transaction });
+            
+            autoEvaluatedCount++;
+            autoEvaluations.push({
+              ruleId: rule.id,
+              ruleDescription: rule.description,
+              participantId: participant.id,
+              evaluationId: autoEvaluation.id
+            });
+            
+            console.log(`🤖 [autoEvaluate] Auto-evaluada: Regla "${rule.description}" para participante ${participant.id} → No Cumple`);
+          } else {
+            // Con evidencias aprobadas → Crear registro pendiente para evaluación manual
+            await RuleCompliance.create({
+              ruleId: rule.id,
+              participantId: participant.id,
+              judgeId: judgeId, // ID del juez que evaluará manualmente
+              isCompliant: null, // Pendiente de evaluación manual
+              judgeComments: null,
+              evaluatedAt: null,
+              autoEvaluated: false
+            }, { transaction });
+            
+            console.log(`📝 [autoEvaluate] Registro creado para evaluación manual: Regla "${rule.description}" para participante ${participant.id}`);
+          }
+        }
+      }
+    }
+    
+    console.log(`✅ [autoEvaluate] Completado: ${autoEvaluatedCount} reglas auto-evaluadas como "No Cumple"`);
+    
+    return {
+      success: true,
+      autoEvaluatedCount,
+      autoEvaluations,
+      message: `${autoEvaluatedCount} reglas auto-evaluadas como "No Cumple" por falta de evidencias aprobadas`
+    };
+    
+  } catch (error) {
+    console.error(`❌ [autoEvaluate] Error en auto-evaluación:`, error);
+    throw error;
+  }
+};
+
+// =====================================
+// EVIDENCE-RULE COMPLIANCE ENDPOINTS
+// =====================================
+
+// Vincular evidencia con reglas
+const linkEvidenceToRules = async (req, res) => {
+  try {
+    const { evidenceId } = req.params;
+    const { ruleIds } = req.body;
+    const userId = req.user.id;
+    
+    console.log(`📎 [linkEvidenceToRules] Vinculando evidencia ${evidenceId} a reglas:`, ruleIds);
+    
+    if (!Array.isArray(ruleIds) || ruleIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Se requiere un array de IDs de reglas'
+      });
+    }
+    
+    const evidenceRuleService = require('../services/evidenceRuleService');
+    const result = await evidenceRuleService.linkEvidenceToRules(evidenceId, ruleIds, userId);
+    
+    console.log(`✅ [linkEvidenceToRules] Evidencia vinculada exitosamente`);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [linkEvidenceToRules] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al vincular evidencia con reglas',
+      error: error.message
+    });
+  }
+};
+
+// Obtener matriz de evaluación para juez
+const getEvaluationMatrix = async (req, res) => {
+  try {
+    const { id: challengeId } = req.params;
+    const judgeId = req.user.id;
+    
+    console.log(`📊 [getEvaluationMatrix] Obteniendo matriz para desafío ${challengeId}`);
+    
+    const evidenceRuleService = require('../services/evidenceRuleService');
+    const result = await evidenceRuleService.getEvaluationMatrix(challengeId, judgeId);
+    
+    console.log(`✅ [getEvaluationMatrix] Matriz obtenida exitosamente`);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [getEvaluationMatrix] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener matriz de evaluación',
+      error: error.message
+    });
+  }
+};
+
+// Obtener vínculos evidencia-regla de un participante
+const getParticipantEvidenceRuleLinks = async (req, res) => {
+  try {
+    const { id: challengeId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`🔗 [getParticipantEvidenceRuleLinks] Obteniendo vínculos para usuario ${userId}`);
+    
+    const evidenceRuleService = require('../services/evidenceRuleService');
+    const result = await evidenceRuleService.getParticipantEvidenceRuleLinks(challengeId, userId);
+    
+    console.log(`✅ [getParticipantEvidenceRuleLinks] Vínculos obtenidos exitosamente`);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [getParticipantEvidenceRuleLinks] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener vínculos de evidencia-regla',
+      error: error.message
+    });
+  }
+};
+
+// Verificar completitud de evaluaciones
+const checkEvaluationCompleteness = async (req, res) => {
+  try {
+    const { id: challengeId } = req.params;
+    const judgeId = req.user.id;
+    
+    console.log(`✅ [checkEvaluationCompleteness] Verificando completitud para desafío ${challengeId}`);
+    
+    // Verificar que el usuario es juez del desafío
+    const challenge = await Challenge.findOne({
+      where: { id: challengeId, judgeId: judgeId }
+    });
+    
+    if (!challenge) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permisos para evaluar este desafío'
+      });
+    }
+    
+    const evidenceRuleService = require('../services/evidenceRuleService');
+    const result = await evidenceRuleService.checkEvaluationCompleteness(challengeId);
+    
+    console.log(`✅ [checkEvaluationCompleteness] Completitud verificada`);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [checkEvaluationCompleteness] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al verificar completitud de evaluaciones',
+      error: error.message
+    });
+  }
+};
+
+// Obtener desafíos del usuario autenticado
+exports.getUserChallenges = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log(`🔍 [getUserChallenges] Obteniendo desafíos para usuario ${userId}`);
+    
+    // Usar consulta SQL cruda con JOINs para incluir datos de usuarios
+    const query = `
+      SELECT DISTINCT 
+        c.*,
+        creator.id as creator_id_data,
+        creator.username as creator_username,
+        creator.full_name as creator_full_name,
+        creator.profile_picture as creator_profile_picture,
+        challenger.id as challenger_id_data,
+        challenger.username as challenger_username,
+        challenger.full_name as challenger_full_name,
+        challenger.profile_picture as challenger_profile_picture,
+        judge.id as judge_id_data,
+        judge.username as judge_username,
+        judge.full_name as judge_full_name,
+        judge.profile_picture as judge_profile_picture,
+        winner.id as winner_id_data,
+        winner.username as winner_username,
+        winner.full_name as winner_full_name,
+        winner.profile_picture as winner_profile_picture,
+        cat.id as category_id_data,
+        cat.name as category_name,
+        cat.description as category_description
+      FROM challenges c
+      LEFT JOIN participants p ON c.id = p.challenge_id
+      LEFT JOIN users creator ON c.creator_id = creator.id
+      LEFT JOIN users challenger ON c.challenger_id = challenger.id
+      LEFT JOIN users judge ON c.judge_id = judge.id
+      LEFT JOIN users winner ON c.winner_id = winner.id
+      LEFT JOIN categories cat ON c.category_id = cat.id
+      WHERE c.creator_id = :userId 
+         OR c.challenger_id = :userId 
+         OR p.user_id = :userId
+      ORDER BY c.created_at DESC
+    `;
+    
+    const rawChallenges = await sequelize.query(query, {
+      replacements: { userId },
+      type: sequelize.QueryTypes.SELECT
+    });
+    
+    // Transformar los datos para que coincidan con el formato esperado por el frontend
+    const challenges = rawChallenges.map(challenge => ({
+      ...challenge,
+      creator: challenge.creator_id_data ? {
+        id: challenge.creator_id_data,
+        username: challenge.creator_username,
+        fullName: challenge.creator_full_name,
+        profilePicture: challenge.creator_profile_picture
+      } : null,
+      challengerUser: challenge.challenger_id_data ? {
+        id: challenge.challenger_id_data,
+        username: challenge.challenger_username,
+        fullName: challenge.challenger_full_name,
+        profilePicture: challenge.challenger_profile_picture
+      } : null,
+      judgeUser: challenge.judge_id_data ? {
+        id: challenge.judge_id_data,
+        username: challenge.judge_username,
+        fullName: challenge.judge_full_name,
+        profilePicture: challenge.judge_profile_picture
+      } : null,
+      winner: challenge.winner_id_data ? {
+        id: challenge.winner_id_data,
+        username: challenge.winner_username,
+        fullName: challenge.winner_full_name,
+        profilePicture: challenge.winner_profile_picture
+      } : null,
+      categoryInfo: challenge.category_id_data ? {
+        id: challenge.category_id_data,
+        name: challenge.category_name,
+        description: challenge.category_description
+      } : null
+    }));
+    
+    console.log(`✅ [getUserChallenges] ${challenges.length} desafíos encontrados`);
+    
+    res.json({
+      success: true,
+      data: challenges
+    });
+  } catch (error) {
+    console.error('❌ [getUserChallenges] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener desafíos del usuario',
+      error: error.message
+    });
+  }
+};
+
+// =====================================
+// EXPORTS
+// =====================================
+
+// Note: All functions are already exported using exports.functionName pattern above
+// The rules system functions are defined as regular functions and exported here
+module.exports = {
+  ...module.exports, // Include all the exports.functionName definitions
+  
+  // Endpoints del sistema de reglas (IMPLEMENTADOS)
+  getChallengeRules,
+  startJudging,
+  evaluateRule,
+  
+  // Additional challenge management functions
+  closeChallenge,
+  determineWinnerByRules,
+  
+  // Evidence-Rule Compliance System (NUEVOS)
+  linkEvidenceToRules,
+  getEvaluationMatrix,
+  getParticipantEvidenceRuleLinks,
+  checkEvaluationCompleteness
 };

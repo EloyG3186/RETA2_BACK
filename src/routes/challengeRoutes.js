@@ -10,6 +10,9 @@ const router = express.Router();
 // Endpoint para subir imagen de desafío
 router.post('/upload-image', authenticate, uploadChallengeImage, challengeController.uploadChallengeImage);
 
+// Rutas para el sistema de reglas
+router.post('/:id/rules', authenticate, challengeController.addChallengeRules);
+
 // Rutas públicas
 router.get('/', challengeController.getChallenges);
 
@@ -60,5 +63,35 @@ router.post('/:id/evidences', authenticate, detectFileMiddleware);
 
 // Ruta para obtener estadu00edsticas de un desafu00edo
 router.get('/:id/stats', authenticate, statsController.getChallengeStats);
+
+// Nuevas rutas para el sistema de reglas y control del juez
+// Obtener reglas de un desafío
+router.get('/:id/rules', authenticate, challengeController.getChallengeRules);
+
+// Rutas de control del juez
+router.post('/:id/close', authenticate, challengeController.closeChallenge);
+// Rutas para el sistema de reglas  
+router.get('/:id/rules', authenticate, challengeController.getChallengeRules);
+router.post('/:id/start-judging', authenticate, challengeController.startJudging);
+router.post('/:id/determine-winner', authenticate, challengeController.determineWinnerByRules);
+
+// Evaluar regla específica
+router.post('/:id/rules/:ruleId/evaluate', authenticate, challengeController.evaluateRule);
+
+// =====================================
+// EVIDENCE-RULE COMPLIANCE ROUTES
+// =====================================
+
+// Vincular evidencia con reglas
+router.post('/evidences/:evidenceId/link-rules', authenticate, challengeController.linkEvidenceToRules);
+
+// Obtener matriz de evaluación para juez
+router.get('/:id/evaluation-matrix', authenticate, challengeController.getEvaluationMatrix);
+
+// Obtener vínculos evidencia-regla de un participante
+router.get('/:id/evidence-rule-links', authenticate, challengeController.getParticipantEvidenceRuleLinks);
+
+// Verificar completitud de evaluaciones
+router.get('/:id/evaluation-completeness', authenticate, challengeController.checkEvaluationCompleteness);
 
 module.exports = router;
